@@ -1,0 +1,79 @@
+* {
+  box-sizing: border-box;
+  padding: 0;
+  margin: 0;
+}
+
+html,
+body {
+  max-width: 100vw;
+  overflow-x: hidden;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen',
+    'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue',
+    sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+body {
+  background-color: #f5f5f5;
+  color: #333;
+}
+
+code {
+  font-family: source-code-pro, Menlo, Monaco, Consolas, 'Courier New',
+    monospace;
+}
+
+/* Diff highlighting styles */
+.diff-added {
+  background-color: #d4edda;
+  color: #155724;
+  padding: 2px 4px;
+  border-radius: 3px;
+}
+
+.diff-removed {
+  background-color: #f8d7da;
+  color: #721c24;
+  padding: 2px 4px;
+  border-radius: 3px;
+  text-decoration: line-through;
+}
+
+.diff-modified-added {
+  background-color: #c3e6cb;
+  color: #155724;
+  padding: 2px 4px;
+  border-radius: 3px;
+}
+
+.diff-modified-removed {
+  background-color: #f5c6cb;
+  color: #721c24;
+  padding: 2px 4px;
+  border-radius: 3px;
+  text-decoration: line-through;
+}
+
+.diff-equal {
+  color: #333;
+}
+
+/* Line highlighting */
+.line-added {
+  background-color: #e8f5e9;
+}
+
+.line-removed {
+  background-color: #ffebee;
+}
+
+.line-modified {
+  background-color: #fff3e0;
+}
+
+.line-equal {
+  background-color: transparent;
+}
+
