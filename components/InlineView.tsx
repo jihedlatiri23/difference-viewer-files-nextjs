@@ -1,7 +1,7 @@
 'use client';
 
 import React from 'react';
-import { getWordLevelDiff, LineDiff } from '@/lib/diffUtils';
+import { getInlineDiff, LineDiff } from '@/lib/diffUtils';
 
 interface InlineViewProps {
   oldText: string;
@@ -9,7 +9,7 @@ interface InlineViewProps {
 }
 
 export default function InlineView({ oldText, newText }: InlineViewProps) {
-  const lineDiffs = getWordLevelDiff(oldText, newText);
+  const lineDiffs = getInlineDiff(oldText, newText);
 
   const renderWord = (word: { value: string; added?: boolean; removed?: boolean }, lineType: string, idx: number) => {
     if (word.added) {
@@ -34,20 +34,38 @@ export default function InlineView({ oldText, newText }: InlineViewProps) {
   };
 
   const renderLine = (lineDiff: LineDiff, index: number) => {
+    if (lineDiff.type === 'context') {
+      return (
+        <div key={index} className="inline-line line-context">
+          <div className="line-ellipsis">
+            <span className="ellipsis-text">⋯</span>
+            <span className="ellipsis-hint">Unchanged lines hidden</span>
+          </div>
+        </div>
+      );
+    }
+    
     const lineClass = `line-${lineDiff.type}`;
 
     return (
       <div key={index} className={`inline-line ${lineClass}`}>
         <div className="line-header">
           <span className="line-type-badge">{lineDiff.type.toUpperCase()}</span>
-          {lineDiff.type === 'removed' && (
-            <span className="line-number">Line {lineDiff.lineNumber}</span>
+          {lineDiff.type === 'removed' && lineDiff.oldLineNumber && (
+            <span className="line-number">Line {lineDiff.oldLineNumber}</span>
           )}
-          {lineDiff.type === 'added' && (
-            <span className="line-number">Line {lineDiff.lineNumber}</span>
+          {lineDiff.type === 'added' && lineDiff.newLineNumber && (
+            <span className="line-number">Line {lineDiff.newLineNumber}</span>
           )}
           {lineDiff.type === 'modified' && (
-            <span className="line-number">Line {lineDiff.lineNumber}</span>
+            <span className="line-number">
+              Line {lineDiff.oldLineNumber} → {lineDiff.newLineNumber}
+            </span>
+          )}
+          {lineDiff.type === 'equal' && (
+            <span className="line-number">
+              Line {lineDiff.oldLineNumber || lineDiff.newLineNumber}
+            </span>
           )}
         </div>
         <div className="line-content">
@@ -206,6 +224,31 @@ export default function InlineView({ oldText, newText }: InlineViewProps) {
 
         .line-equal .line-content {
           color: #999;
+        }
+
+        .line-context {
+          margin: 8px 0;
+        }
+
+        .line-ellipsis {
+          padding: 16px;
+          text-align: center;
+          background-color: #f8f9fa;
+          border-top: 1px solid #e0e0e0;
+          border-bottom: 1px solid #e0e0e0;
+          user-select: none;
+        }
+
+        .ellipsis-text {
+          font-size: 24px;
+          color: #999;
+          display: block;
+          margin-bottom: 4px;
+        }
+
+        .ellipsis-hint {
+          font-size: 12px;
+          color: #666;
         }
       `}</style>
     </div>
