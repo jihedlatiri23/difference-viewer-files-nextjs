@@ -8,121 +8,30 @@ export interface WordDiff {
 
 export interface LineDiff {
   lineNumber: number;
+  oldLineNumber?: number;
+  newLineNumber?: number;
   oldLine?: string;
   newLine?: string;
   words: WordDiff[];
-  type: 'equal' | 'added' | 'removed' | 'modified';
-}
-
-/**
- * Perform word-level diff on two texts
- */
-export function getWordLevelDiff(oldText: string, newText: string): LineDiff[] {
-  // Ensure we have valid text
-  if (!oldText || !newText) {
-    return [];
-  }
-  
-  const oldLines = oldText.split('\n');
-  const newLines = newText.split('\n');
-  
-  const lineDiffs = diffLines(oldText, newText);
-  const result: LineDiff[] = [];
-  let oldLineNum = 1;
-  let newLineNum = 1;
-
-  for (const change of lineDiffs) {
-    const lines = change.value.split('\n').filter(l => l.length > 0 || change.value.includes('\n'));
-    
-    if (change.added) {
-      // Added lines
-      for (const line of lines) {
-        if (line.trim()) {
-          const wordDiffs = diffWords('', line);
-          result.push({
-            lineNumber: newLineNum,
-            newLine: line,
-            words: wordDiffs.map(w => ({
-              value: w.value,
-              added: w.added || undefined,
-              removed: w.removed || undefined,
-            })),
-            type: 'added',
-          });
-          newLineNum++;
-        }
-      }
-    } else if (change.removed) {
-      // Removed lines
-      for (const line of lines) {
-        if (line.trim()) {
-          const wordDiffs = diffWords(line, '');
-          result.push({
-            lineNumber: oldLineNum,
-            oldLine: line,
-            words: wordDiffs.map(w => ({
-              value: w.value,
-              added: w.added || undefined,
-              removed: w.removed || undefined,
-            })),
-            type: 'removed',
-          });
-          oldLineNum++;
-        }
-      }
-    } else {
-      // Equal or modified lines - need to check word-level changes
-      for (const line of lines) {
-        if (line.trim()) {
-          // Find corresponding lines in old and new
-          const oldLine = oldLines[oldLineNum - 1] || '';
-          const newLine = newLines[newLineNum - 1] || '';
-          
-          if (oldLine === newLine) {
-            // Completely equal
-            result.push({
-              lineNumber: oldLineNum,
-              oldLine,
-              newLine,
-              words: [{ value: line, added: undefined, removed: undefined }],
-              type: 'equal',
-            });
-          } else {
-            // Modified - do word-level diff
-            const wordDiffs = diffWords(oldLine, newLine);
-            result.push({
-              lineNumber: oldLineNum,
-              oldLine,
-              newLine,
-              words: wordDiffs.map(w => ({
-                value: w.value,
-                added: w.added || undefined,
-                removed: w.removed || undefined,
-              })),
-              type: 'modified',
-            });
-          }
-          oldLineNum++;
-          newLineNum++;
-        }
-      }
-    }
-  }
-
-  return result;
+  type: 'equal' | 'added' | 'removed' | 'modified' | 'context';
 }
 
 /**
  * Get aligned line pairs for side-by-side view
+ * Only shows changed lines + context (like GitHub diff viewer)
  */
-export function getAlignedLines(oldText: string, newText: string): {
+export function getAlignedLines(
+  oldText: string, 
+  newText: string,
+  contextLines: number = 3
+): {
   oldLines: (string | null)[];
   newLines: (string | null)[];
-  changes: Array<{ type: 'equal' | 'added' | 'removed' | 'modified'; oldIndex: number; newIndex: number }>;
+  changes: Array<{ type: 'equal' | 'added' | 'removed' | 'modified' | 'context'; oldIndex: number; newIndex: number; oldLineNumber?: number; newLineNumber?: number }>;
+  blocks: any[];
 } {
-  // Ensure we have valid text
   if (!oldText || !newText) {
-    return { oldLines: [], newLines: [], changes: [] };
+    return { oldLines: [], newLines: [], changes: [], blocks: [] };
   }
   
   const oldLines = oldText.split('\n').map(l => l.trim()).filter(l => l.length > 0);
@@ -130,58 +39,145 @@ export function getAlignedLines(oldText: string, newText: string): {
   
   const lineDiffs = diffLines(oldText, newText);
   
+  // Build result showing only changes + context
   const alignedOld: (string | null)[] = [];
   const alignedNew: (string | null)[] = [];
-  const changes: Array<{ type: 'equal' | 'added' | 'removed' | 'modified'; oldIndex: number; newIndex: number }> = [];
+  const changes: Array<{ type: 'equal' | 'added' | 'removed' | 'modified' | 'context'; oldIndex: number; newIndex: number; oldLineNumber?: number; newLineNumber?: number }> = [];
   
-  let oldLineIdx = 0;
-  let newLineIdx = 0;
-
+  let oldIdx = 0;
+  let newIdx = 0;
+  let alignedIdx = 0;
+  let lastShownIdx = -1;
+  let contextBuffer: Array<{ oldLine: string; newLine: string; oldIdx: number; newIdx: number }> = [];
+  
+  const flushContext = () => {
+    for (const ctx of contextBuffer) {
+      alignedOld.push(ctx.oldLine);
+      alignedNew.push(ctx.newLine);
+      changes.push({
+        type: 'equal',
+        oldIndex: alignedIdx,
+        newIndex: alignedIdx,
+        oldLineNumber: ctx.oldIdx + 1,
+        newLineNumber: ctx.newIdx + 1
+      });
+      alignedIdx++;
+    }
+    contextBuffer = [];
+  };
+  
+  const addEllipsis = () => {
+    if (alignedIdx > 0 && changes[alignedIdx - 1]?.type !== 'context') {
+      alignedOld.push(null);
+      alignedNew.push(null);
+      changes.push({
+        type: 'context',
+        oldIndex: alignedIdx,
+        newIndex: alignedIdx
+      });
+      alignedIdx++;
+    }
+  };
+  
   for (const change of lineDiffs) {
     const lines = change.value.split('\n').filter(l => l.trim().length > 0);
     
     if (change.added) {
-      // Added lines - only in new version
+      // Flush context before showing added lines
+      flushContext();
+      
+      // Add ellipsis if there's a gap
+      if (lastShownIdx >= 0 && alignedIdx - lastShownIdx > contextLines + 1) {
+        addEllipsis();
+      }
+      
       for (const line of lines) {
         alignedOld.push(null);
         alignedNew.push(line);
-        const idx = alignedOld.length - 1;
-        changes.push({ type: 'added', oldIndex: idx, newIndex: idx });
-        newLineIdx++;
+        changes.push({
+          type: 'added',
+          oldIndex: alignedIdx,
+          newIndex: alignedIdx,
+          newLineNumber: newIdx + 1
+        });
+        alignedIdx++;
+        newIdx++;
+        lastShownIdx = alignedIdx;
       }
+      
+      // Clear context buffer after changes
+      contextBuffer = [];
+      
     } else if (change.removed) {
-      // Removed lines - only in old version
+      // Flush context before showing removed lines
+      flushContext();
+      
+      // Add ellipsis if there's a gap
+      if (lastShownIdx >= 0 && alignedIdx - lastShownIdx > contextLines + 1) {
+        addEllipsis();
+      }
+      
       for (const line of lines) {
         alignedOld.push(line);
         alignedNew.push(null);
-        const idx = alignedOld.length - 1;
-        changes.push({ type: 'removed', oldIndex: idx, newIndex: idx });
-        oldLineIdx++;
+        changes.push({
+          type: 'removed',
+          oldIndex: alignedIdx,
+          newIndex: alignedIdx,
+          oldLineNumber: oldIdx + 1
+        });
+        alignedIdx++;
+        oldIdx++;
+        lastShownIdx = alignedIdx;
       }
+      
+      // Clear context buffer after changes
+      contextBuffer = [];
+      
     } else {
-      // Equal or potentially modified lines
+      // Equal lines - only keep context buffer, don't show all
       for (const line of lines) {
-        const oldLine = oldLines[oldLineIdx] || '';
-        const newLine = newLines[newLineIdx] || '';
+        const oldLine = oldLines[oldIdx] || '';
+        const newLine = newLines[newIdx] || '';
         
         if (oldLine === newLine) {
-          alignedOld.push(oldLine);
-          alignedNew.push(newLine);
-          const idx = alignedOld.length - 1;
-          changes.push({ type: 'equal', oldIndex: idx, newIndex: idx });
+          // Add to context buffer (only keep last N lines)
+          contextBuffer.push({ oldLine, newLine, oldIdx, newIdx });
+          if (contextBuffer.length > contextLines) {
+            contextBuffer.shift();
+          }
         } else {
+          // Modified line - flush context and show it
+          flushContext();
+          
+          // Add ellipsis if there's a gap
+          if (lastShownIdx >= 0 && alignedIdx - lastShownIdx > contextLines + 1) {
+            addEllipsis();
+          }
+          
           alignedOld.push(oldLine);
           alignedNew.push(newLine);
-          const idx = alignedOld.length - 1;
-          changes.push({ type: 'modified', oldIndex: idx, newIndex: idx });
+          changes.push({
+            type: 'modified',
+            oldIndex: alignedIdx,
+            newIndex: alignedIdx,
+            oldLineNumber: oldIdx + 1,
+            newLineNumber: newIdx + 1
+          });
+          alignedIdx++;
+          lastShownIdx = alignedIdx;
+          contextBuffer = [];
         }
-        oldLineIdx++;
-        newLineIdx++;
+        oldIdx++;
+        newIdx++;
       }
     }
   }
+  
+  // Flush any remaining context at the end
+  flushContext();
 
-  return { oldLines: alignedOld, newLines: alignedNew, changes };
+  return { oldLines: alignedOld, newLines: alignedNew, changes, blocks: [] };
 }
 
 /**
@@ -193,7 +189,6 @@ export function getWordDiffForLine(oldLine: string | null, newLine: string | nul
   }
   
   if (oldLine === null) {
-    // Added line
     const wordDiffs = diffWords('', newLine || '');
     return wordDiffs.map(w => ({
       value: w.value,
@@ -203,7 +198,6 @@ export function getWordDiffForLine(oldLine: string | null, newLine: string | nul
   }
   
   if (newLine === null) {
-    // Removed line
     const wordDiffs = diffWords(oldLine, '');
     return wordDiffs.map(w => ({
       value: w.value,
@@ -212,7 +206,6 @@ export function getWordDiffForLine(oldLine: string | null, newLine: string | nul
     }));
   }
   
-  // Both lines exist - compare them
   const wordDiffs = diffWords(oldLine, newLine);
   return wordDiffs.map(w => ({
     value: w.value,
@@ -221,3 +214,154 @@ export function getWordDiffForLine(oldLine: string | null, newLine: string | nul
   }));
 }
 
+/**
+ * Get inline diff showing only changes (like GitHub unified diff)
+ */
+export function getInlineDiff(
+  oldText: string, 
+  newText: string,
+  contextLines: number = 3
+): LineDiff[] {
+  if (!oldText || !newText) {
+    return [];
+  }
+  
+  const oldLines = oldText.split('\n');
+  const newLines = newText.split('\n');
+  const lineDiffs = diffLines(oldText, newText);
+  
+  const result: LineDiff[] = [];
+  let oldLineNum = 1;
+  let newLineNum = 1;
+  let lastShownLine = -1;
+  let contextBuffer: Array<{ line: string; oldNum: number; newNum: number }> = [];
+  
+  const flushContext = () => {
+    for (const ctx of contextBuffer) {
+      result.push({
+        lineNumber: ctx.oldNum,
+        oldLineNumber: ctx.oldNum,
+        newLineNumber: ctx.newNum,
+        oldLine: ctx.line,
+        newLine: ctx.line,
+        words: [{ value: ctx.line, added: undefined, removed: undefined }],
+        type: 'equal',
+      });
+    }
+    contextBuffer = [];
+  };
+  
+  for (const change of lineDiffs) {
+    const lines = change.value.split('\n').filter(l => l.length > 0 || change.value.includes('\n'));
+    
+    if (change.added) {
+      flushContext();
+      
+      if (lastShownLine >= 0 && newLineNum - lastShownLine > contextLines + 1) {
+        result.push({
+          lineNumber: newLineNum,
+          type: 'context',
+          words: [{ value: '...', added: undefined, removed: undefined }],
+        });
+      }
+      
+      for (const line of lines) {
+        if (line.trim()) {
+          const wordDiffs = diffWords('', line);
+          result.push({
+            lineNumber: newLineNum,
+            newLineNumber: newLineNum,
+            newLine: line,
+            words: wordDiffs.map(w => ({
+              value: w.value,
+              added: w.added || undefined,
+              removed: w.removed || undefined,
+            })),
+            type: 'added',
+          });
+          newLineNum++;
+          lastShownLine = newLineNum;
+        }
+      }
+      contextBuffer = [];
+      
+    } else if (change.removed) {
+      flushContext();
+      
+      if (lastShownLine >= 0 && oldLineNum - lastShownLine > contextLines + 1) {
+        result.push({
+          lineNumber: oldLineNum,
+          type: 'context',
+          words: [{ value: '...', added: undefined, removed: undefined }],
+        });
+      }
+      
+      for (const line of lines) {
+        if (line.trim()) {
+          const wordDiffs = diffWords(line, '');
+          result.push({
+            lineNumber: oldLineNum,
+            oldLineNumber: oldLineNum,
+            oldLine: line,
+            words: wordDiffs.map(w => ({
+              value: w.value,
+              added: w.added || undefined,
+              removed: w.removed || undefined,
+            })),
+            type: 'removed',
+          });
+          oldLineNum++;
+          lastShownLine = oldLineNum;
+        }
+      }
+      contextBuffer = [];
+      
+    } else {
+      for (const line of lines) {
+        if (line.trim()) {
+          const oldLine = oldLines[oldLineNum - 1] || '';
+          const newLine = newLines[newLineNum - 1] || '';
+          
+          if (oldLine === newLine) {
+            contextBuffer.push({ line: oldLine, oldNum: oldLineNum, newNum: newLineNum });
+            if (contextBuffer.length > contextLines) {
+              contextBuffer.shift();
+            }
+          } else {
+            flushContext();
+            
+            if (lastShownLine >= 0 && oldLineNum - lastShownLine > contextLines + 1) {
+              result.push({
+                lineNumber: oldLineNum,
+                type: 'context',
+                words: [{ value: '...', added: undefined, removed: undefined }],
+              });
+            }
+            
+            const wordDiffs = diffWords(oldLine, newLine);
+            result.push({
+              lineNumber: oldLineNum,
+              oldLineNumber: oldLineNum,
+              newLineNumber: newLineNum,
+              oldLine,
+              newLine,
+              words: wordDiffs.map(w => ({
+                value: w.value,
+                added: w.added || undefined,
+                removed: w.removed || undefined,
+              })),
+              type: 'modified',
+            });
+            lastShownLine = oldLineNum;
+            contextBuffer = [];
+          }
+          oldLineNum++;
+          newLineNum++;
+        }
+      }
+    }
+  }
+  
+  flushContext();
+  return result;
+}
