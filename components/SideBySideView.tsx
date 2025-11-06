@@ -1,16 +1,27 @@
 'use client';
 
-import React from 'react';
+import React, { useState } from 'react';
 import { getWordDiffForLine } from '@/lib/diffUtils';
 
 interface SideBySideViewProps {
   oldLines: (string | null)[];
   newLines: (string | null)[];
-  changes: Array<{ type: 'equal' | 'added' | 'removed' | 'modified'; oldIndex: number; newIndex: number }>;
+  changes: Array<{ type: 'equal' | 'added' | 'removed' | 'modified' | 'context'; oldIndex: number; newIndex: number; oldLineNumber?: number; newLineNumber?: number }>;
 }
 
 export default function SideBySideView({ oldLines, newLines, changes }: SideBySideViewProps) {
-  const renderLine = (line: string | null, type: 'old' | 'new', idx: number, changeType: string) => {
+  const [collapsedSections, setCollapsedSections] = useState<Set<number>>(new Set());
+
+  const renderLine = (line: string | null, type: 'old' | 'new', idx: number, changeType: string, lineNumber?: number) => {
+    if (line === null && changeType === 'context') {
+      return (
+        <div className="line-ellipsis">
+          <span className="ellipsis-text">⋯</span>
+          <span className="ellipsis-hint">Unchanged lines hidden</span>
+        </div>
+      );
+    }
+    
     if (line === null) {
       return <div className="line-empty"></div>;
     }
@@ -82,10 +93,18 @@ export default function SideBySideView({ oldLines, newLines, changes }: SideBySi
         <div className="side-panel old-panel">
           {oldLines.map((line, idx) => {
             const change = changes[idx] || { type: 'equal' as const, oldIndex: idx, newIndex: idx };
+            const isCollapsed = collapsedSections.has(idx);
+            
+            if (isCollapsed && change.type === 'equal') {
+              return null; // Hide collapsed equal lines
+            }
+            
             return (
               <div key={`old-${idx}`} className="line-container">
-                <span className="line-number">{idx + 1}</span>
-                {renderLine(line, 'old', idx, change.type)}
+                <span className="line-number" title={`Line ${change.oldLineNumber || idx + 1}`}>
+                  {change.oldLineNumber || (change.type === 'added' ? '' : idx + 1)}
+                </span>
+                {renderLine(line, 'old', idx, change.type, change.oldLineNumber)}
               </div>
             );
           })}
@@ -93,10 +112,18 @@ export default function SideBySideView({ oldLines, newLines, changes }: SideBySi
         <div className="side-panel new-panel">
           {newLines.map((line, idx) => {
             const change = changes[idx] || { type: 'equal' as const, oldIndex: idx, newIndex: idx };
+            const isCollapsed = collapsedSections.has(idx);
+            
+            if (isCollapsed && change.type === 'equal') {
+              return null; // Hide collapsed equal lines
+            }
+            
             return (
               <div key={`new-${idx}`} className="line-container">
-                <span className="line-number">{idx + 1}</span>
-                {renderLine(line, 'new', idx, change.type)}
+                <span className="line-number" title={`Line ${change.newLineNumber || idx + 1}`}>
+                  {change.newLineNumber || (change.type === 'removed' ? '' : idx + 1)}
+                </span>
+                {renderLine(line, 'new', idx, change.type, change.newLineNumber)}
               </div>
             );
           })}
@@ -186,6 +213,34 @@ export default function SideBySideView({ oldLines, newLines, changes }: SideBySi
           flex: 1;
           padding: 4px 8px;
           background-color: #f5f5f5;
+        }
+
+        .line-ellipsis {
+          flex: 1;
+          padding: 12px 8px;
+          text-align: center;
+          background-color: #f8f9fa;
+          border-top: 1px solid #e0e0e0;
+          border-bottom: 1px solid #e0e0e0;
+          cursor: pointer;
+          user-select: none;
+          transition: background-color 0.2s;
+        }
+
+        .line-ellipsis:hover {
+          background-color: #e9ecef;
+        }
+
+        .ellipsis-text {
+          font-size: 24px;
+          color: #999;
+          display: block;
+          margin-bottom: 4px;
+        }
+
+        .ellipsis-hint {
+          font-size: 12px;
+          color: #666;
         }
       `}</style>
     </div>
